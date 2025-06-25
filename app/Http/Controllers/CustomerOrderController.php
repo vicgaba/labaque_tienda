@@ -34,7 +34,7 @@ class CustomerOrderController extends Controller
     public function create(): View
     {
         $clients = Client::with('user')->get(); // Obtiene todos los clientes para el dropdown
-        $products = Product::where('is_active', true)->where('stock', '>', 0)->orderBy('name')->get(); // Obtiene productos activos y con stock
+        $products = Product::where('active', true)->where('stock', '>', 0)->orderBy('name')->get(); // Obtiene productos activos y con stock
         return view('customer_orders.create', compact('clients', 'products'));
     }
 

@@ -49,7 +49,7 @@ class ProductController extends Controller
             'color' => 'nullable|string|max:255',
             'brand' => 'nullable|string|max:255',
             'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048', // Validación para la imagen
-            'is_active' => 'boolean',
+            'active' => 'boolean',
         ]);
 
         $imagePath = null;
@@ -103,7 +103,7 @@ class ProductController extends Controller
             'color' => 'nullable|string|max:255',
             'brand' => 'nullable|string|max:255',
             'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
-            'is_active' => 'boolean',
+            'active' => 'boolean',
         ]);
 
         // Manejo de la imagen: si se sube una nueva, eliminar la anterior

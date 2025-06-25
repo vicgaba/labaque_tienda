@@ -34,7 +34,7 @@ class SupplierOrderController extends Controller
     public function create(): View
     {
         $suppliers = Supplier::all(); // Obtiene todos los proveedores para el dropdown
-        $products = Product::where('is_active', true)->orderBy('name')->get(); // Obtiene todos los productos activos
+        $products = Product::where('active', true)->orderBy('name')->get(); // Obtiene todos los productos activos
         return view('supplier_orders.create', compact('suppliers', 'products'));
     }
 
@@ -155,7 +155,7 @@ class SupplierOrderController extends Controller
     public function edit(SupplierOrder $supplierOrder): View
     {
         $supplierOrder->load(['supplier', 'supplierOrderItems.product']);
-        $products = Product::where('is_active', true)->orderBy('name')->get(); // Para referencia, aunque no se editen ítems aquí
+        $products = Product::where('active', true)->orderBy('name')->get(); // Para referencia, aunque no se editen ítems aquí
         return view('supplier_orders.edit', compact('supplierOrder', 'products'));
     }
 
