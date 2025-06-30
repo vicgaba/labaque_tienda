@@ -15,10 +15,24 @@ class ClientController extends Controller
      * Display a listing of the resource.
      * Muestra una lista de los recursos (clientes).
      */
-    public function index(): View
+    public function index(Request $request): View
     {
-        $clients = Client::with('user')->latest()->paginate(10); // Obtiene clientes con su usuario asociado, paginados
-        return view('clients.index', compact('clients')); // Pasa los clientes a la vista
+        $search = $request->get('search'); // Obtiene el término de búsqueda de la solicitud    
+        
+        $clients = Client::with('user')
+        ->when($search, function ($query) use ($search) {
+            return $query->where(function ($q) use ($search) {
+                $q->where('phone', 'like', '%' . $search . '%')
+                  ->orWhere('dni', 'like', '%' . $search . '%')
+                  ->orWhereHas('user', function ($userQuery) use ($search) {
+                      $userQuery->where('name', 'like', '%' . $search . '%')
+                               ->orWhere('email', 'like', '%' . $search . '%');
+                  });
+            });
+        })
+        ->paginate(10);
+    
+    return view('clients.index', compact('clients')); // Pasa los clientes a la vista
     }
 
     /**

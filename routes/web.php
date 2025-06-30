@@ -31,8 +31,10 @@ Route::middleware(['auth', 'role:admin'])->group(function () {
     Route::resource('suppliers', SupplierController::class);
     Route::resource('clients', ClientController::class);
     Route::resource('supplier-orders', SupplierOrderController::class);
-    
-
+    Route::patch('/categories/{category}/toggle', [CategoryController::class, 'toggle'])->name('categories.toggle');
+    Route::patch('/products/{product}/toggle', [ProductController::class, 'toggle'])->name('products.toggle');
+    Route::post('/products/bulk-action', [ProductController::class, 'bulkAction'])->name('products.bulk-action');
+    Route::get('/products-export', [ProductController::class, 'export'])->name('products.export');
 
     // Ejemplo: Rutas para gestionar usuarios (solo admin)
     Route::get('/admin/users', function () {

@@ -13,9 +13,20 @@ class SupplierController extends Controller
      * Display a listing of the resource.
      * Muestra una lista de los recursos (proveedores).
      */
-    public function index(): View
+    public function index(Request $request): View
     {
-        $suppliers = Supplier::latest()->paginate(10); // Obtiene todos los proveedores, paginados
+        $search = $request->get('search'); // Obtiene el término de búsqueda de la solicitud
+        
+        $suppliers = Supplier::latest()
+        ->when($search, function ($query) use ($search) {
+            return $query->where(function ($q) use ($search) {
+                $q->where('phone', 'like', '%' . $search . '%')
+//change for cuit                  ->orWhere('dni', 'like', '%' . $search . '%')
+                  ->orWhere('name', 'like', '%' . $search . '%')
+                  ->orWhere('email', 'like', '%' . $search . '%');
+            });
+        })->paginate(10); // Obtiene todos los proveedores, paginados
+
         return view('suppliers.index', compact('suppliers')); // Pasa los proveedores a la vista
     }
 

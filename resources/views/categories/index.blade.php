@@ -42,6 +42,9 @@
                                     <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         Descripción
                                     </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Estado
+                                    </th>
                                     <th scope="col" class="relative px-6 py-3">
                                         <span class="sr-only">Acciones</span>
                                     </th>
@@ -59,8 +62,29 @@
                                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                             {{ $category->description ?? 'N/A' }}
                                         </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            @if($category->active)
+                                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                                    Activa
+                                                </span>
+                                            @else
+                                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                                    Inactiva
+                                                </span>
+                                            @endif
+                                        </td>
                                         <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                             <a href="{{ route('categories.edit', $category) }}" class="text-indigo-600 hover:text-indigo-900 mr-3">Editar</a>
+                                            
+                                            {{-- Botón para cambiar estado --}}
+                                            <form action="{{ route('categories.toggle', $category) }}" method="POST" class="inline mr-3">
+                                                @csrf
+                                                @method('PATCH')
+                                                <button type="submit" class="text-yellow-600 hover:text-yellow-900">
+                                                    {{ $category->active ? 'Desactivar' : 'Activar' }}
+                                                </button>
+                                            </form>
+                                            
                                             <form action="{{ route('categories.destroy', $category) }}" method="POST" class="inline">
                                                 @csrf
                                                 @method('DELETE')
@@ -70,7 +94,7 @@
                                     </tr>
                                 @empty
                                     <tr>
-                                        <td colspan="4" class="px-6 py-4 text-center text-sm text-gray-500">
+                                        <td colspan="5" class="px-6 py-4 text-center text-sm text-gray-500">
                                             No hay categorías registradas.
                                         </td>
                                     </tr>

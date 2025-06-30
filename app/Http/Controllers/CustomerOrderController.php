@@ -3,214 +3,255 @@
 namespace App\Http\Controllers;
 
 use App\Models\CustomerOrder;
-use App\Models\Client; // Para seleccionar el cliente
-use App\Models\Product; // Para seleccionar los productos
-use App\Models\StockMovement; // Para registrar movimientos de stock
+use App\Models\Client;
+use App\Models\Product;
+use App\Models\StockMovement;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Support\Facades\DB; // Para transacciones de base de datos
-use Illuminate\Support\Facades\Auth; // Para obtener el usuario autenticado
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
+// Importa las clases para exportación si las usas (ej. para PDF o Excel)
+// use Barryvdh\DomPDF\Facade\Pdf; 
+// use App\Exports\CustomerOrdersExport;
+// use Maatwebsite\Excel\Facades\Excel;
 
 class CustomerOrderController extends Controller
 {
     /**
-     * Display a listing of the resource.
-     * Muestra una lista de los recursos (pedidos de clientes).
+     * Muestra una lista de las órdenes con filtros y ordenamiento.
      */
-    public function index(): View
+    public function index(Request $request): View
     {
-        // Obtiene todos los pedidos de clientes con su cliente asociado y los ítems
-        $customerOrders = CustomerOrder::with(['client.user', 'customerOrderItems.product'])
-                                       ->latest()
-                                       ->paginate(10);
+        // Inicia la consulta base con las relaciones necesarias para evitar N+1
+        $query = CustomerOrder::with(['client.user', 'customerOrderItems.product']);
+
+        // 1. Filtro de búsqueda general
+        $query->when($request->filled('search'), function ($q) use ($request) {
+            $search = $request->search;
+            // Agrupa las condiciones de búsqueda para que no interfieran con otros filtros
+            $q->where(function($subQuery) use ($search) {
+                $subQuery->where('id', 'like', "%{$search}%") // Buscar por ID de orden
+                         ->orWhereHas('client.user', function ($userQuery) use ($search) {
+                             $userQuery->where('name', 'like', "%{$search}%")
+                                       ->orWhere('email', 'like', "%{$search}%");
+                         })
+                         ->orWhereHas('customerOrderItems.product', function ($productQuery) use ($search) {
+                             $productQuery->where('name', 'like', "%{$search}%");
+                         });
+            });
+        });
+
+        // 2. Filtros específicos
+        $query->when($request->filled('status'), function ($q) use ($request) {
+            $q->where('status', $request->status);
+        });
+
+        $query->when($request->filled('date_from'), function ($q) use ($request) {
+            $q->whereDate('created_at', '>=', $request->date_from);
+        });
+
+        $query->when($request->filled('date_to'), function ($q) use ($request) {
+            $q->whereDate('created_at', '<=', $request->date_to);
+        });
+
+        $query->when($request->filled('min_amount'), function ($q) use ($request) {
+            $q->where('total_amount', '>=', $request->min_amount);
+        });
+
+        $query->when($request->filled('max_amount'), function ($q) use ($request) {
+            $q->where('total_amount', '<=', $request->max_amount);
+        });
+        
+        // 3. Lógica de Ordenamiento
+        $sortBy = $request->input('sort_by', 'created_at_desc'); // Por defecto, más recientes
+        
+        switch ($sortBy) {
+            case 'created_at_asc':
+                $query->orderBy('created_at', 'asc');
+                break;
+            case 'total_amount_desc':
+                $query->orderBy('total_amount', 'desc');
+                break;
+            case 'total_amount_asc':
+                $query->orderBy('total_amount', 'asc');
+                break;
+            case 'client_name':
+                // Se necesita un join para ordenar por un campo de una tabla relacionada
+                $query->join('clients', 'customer_orders.client_id', '=', 'clients.id')
+                      ->join('users', 'clients.user_id', '=', 'users.id')
+                      ->orderBy('users.name', 'asc')
+                      ->select('customer_orders.*'); // Evita la ambigüedad de columnas
+                break;
+            case 'id_asc':
+                $query->orderBy('id', 'asc');
+                break;
+            case 'id_desc':
+                $query->orderBy('id', 'desc');
+                break;
+            default:
+                $query->orderBy('created_at', 'desc');
+                break;
+        }
+
+        // 4. Paginación
+        // Se usa `appends` para que los parámetros de filtro se mantengan en los enlaces de paginación
+        $customerOrders = $query->paginate(10)->appends($request->query());
+        
         return view('customer_orders.index', compact('customerOrders'));
     }
 
     /**
-     * Show the form for creating a new resource.
-     * Muestra el formulario para crear un nuevo recurso (pedido de cliente).
+     * Muestra el formulario para crear una nueva orden.
      */
     public function create(): View
     {
-        $clients = Client::with('user')->get(); // Obtiene todos los clientes para el dropdown
-        $products = Product::where('active', true)->where('stock', '>', 0)->orderBy('name')->get(); // Obtiene productos activos y con stock
+        $clients = Client::with('user')->get()->sortBy('user.name');
+        $products = Product::where('active', true)->where('stock', '>', 0)->orderBy('name')->get();
         return view('customer_orders.create', compact('clients', 'products'));
     }
 
     /**
-     * Store a newly created resource in storage.
-     * Almacena un nuevo recurso (pedido de cliente) en la base de datos.
+     * Almacena una nueva orden en la base de datos.
      */
     public function store(Request $request): RedirectResponse
     {
-        // Validar los datos del formulario
-        $request->validate([
+        Log::info('CustomerOrder Store - Request data:', $request->all());
+
+        $validated = $request->validate([
             'client_id' => 'required|exists:clients,id',
             'product_ids' => 'required|array|min:1',
-            'product_ids.*' => 'exists:products,id',
+            'product_ids.*' => 'required|exists:products,id',
             'quantities' => 'required|array|min:1',
             'quantities.*' => 'required|integer|min:1',
-            'shipping_address' => 'nullable|string|max:255',
+            'shipping_address' => 'nullable|string|max:500',
             'status' => 'required|in:pending,processing,completed,cancelled',
         ]);
 
-        DB::beginTransaction(); // Iniciar una transacción de base de datos
+        if (count($validated['product_ids']) !== count($validated['quantities'])) {
+            return redirect()->back()->withInput()->withErrors(['quantities' => 'La cantidad de productos y cantidades no coincide.']);
+        }
 
+        DB::beginTransaction();
         try {
             $totalAmount = 0;
             $orderItemsData = [];
-            $stockMovementsData = [];
 
-            // Preparar los ítems del pedido y verificar el stock
-            foreach ($request->product_ids as $index => $productId) {
+            foreach ($validated['product_ids'] as $index => $productId) {
                 $product = Product::find($productId);
-                $quantity = (int) $request->quantities[$index];
+                $quantity = (int) $validated['quantities'][$index];
 
-                // Verificar stock disponible
-                if (!$product || $product->stock < $quantity) {
-                    DB::rollBack();
-                    return redirect()->back()->withInput()->with('error', 'Stock insuficiente para el producto: ' . ($product ? $product->name : 'Desconocido'));
+                if (!$product) {
+                    throw new \Exception("Producto con ID {$productId} no encontrado.");
+                }
+                if ($product->stock < $quantity) {
+                    throw new \Exception("Stock insuficiente para {$product->name}. Stock disponible: {$product->stock}");
                 }
 
                 $orderItemsData[] = [
                     'product_id' => $productId,
                     'quantity' => $quantity,
-                    'price_at_order' => $product->price, // Usar el precio actual del producto
+                    'price_at_order' => $product->price,
                 ];
                 $totalAmount += ($quantity * $product->price);
-
-                // Preparar los datos para el movimiento de stock
-                $stockMovementsData[] = [
-                    'product_id' => $productId,
-                    'user_id' => Auth::id(), // El usuario logueado registra el movimiento
-                    'type' => 'out', // Salida de stock
-                    'quantity' => $quantity,
-                    'reason' => 'Venta a cliente',
-                    'created_at' => now(), // Asegurarse de tener timestamps para los movimientos
-                    'updated_at' => now(),
-                    // source_type y source_id se llenarán después de crear la orden
-                ];
             }
 
-            // Crear el pedido del cliente
             $customerOrder = CustomerOrder::create([
-                'client_id' => $request->client_id,
+                'client_id' => $validated['client_id'],
                 'total_amount' => $totalAmount,
-                'status' => $request->status,
-                'shipping_address' => $request->shipping_address,
+                'status' => $validated['status'],
+                'shipping_address' => $validated['shipping_address'],
             ]);
 
-            // Crear los ítems del pedido y asociarlos a la orden
+            Log::info('CustomerOrder created:', ['id' => $customerOrder->id]);
+
             foreach ($orderItemsData as $itemData) {
                 $customerOrder->customerOrderItems()->create($itemData);
-
-                // Actualizar el stock del producto
                 $product = Product::find($itemData['product_id']);
                 if ($product) {
                     $product->decrement('stock', $itemData['quantity']);
+                    
+                    // Asegúrate que tu modelo CustomerOrder tiene la relación stockMovements
+                    // if (method_exists($customerOrder, 'stockMovements')) {
+                    //     StockMovement::create([
+                    //         'product_id' => $itemData['product_id'],
+                    //         'user_id' => Auth::id(),
+                    //         'type' => 'out',
+                    //         'quantity' => $itemData['quantity'],
+                    //         'reason' => 'Venta a cliente',
+                    //         'movable_id' => $customerOrder->id,
+                    //         'movable_type' => CustomerOrder::class,
+                    //     ]);
+                    // }
                 }
             }
-
-            // Crear los movimientos de stock, asociándolos a la orden creada
-            foreach ($stockMovementsData as $movementData) {
-                $customerOrder->stockMovement()->create(array_merge($movementData, [
-                    'source_type' => $customerOrder->getMorphClass(),
-                    'source_id' => $customerOrder->id,
-                ]));
-            }
-
-            DB::commit(); // Confirmar la transacción
+            DB::commit();
             return redirect()->route('customer-orders.index')->with('success', 'Venta registrada exitosamente.');
-
         } catch (\Exception $e) {
-            DB::rollBack(); // Revertir la transacción en caso de error
+            DB::rollBack();
+            Log::error('CustomerOrder store error:', ['error' => $e->getMessage()]);
             return redirect()->back()->withInput()->with('error', 'Error al registrar la venta: ' . $e->getMessage());
         }
     }
 
     /**
-     * Display the specified resource.
-     * Muestra el recurso (pedido de cliente) especificado.
+     * Muestra una orden específica.
      */
     public function show(CustomerOrder $customerOrder): View
     {
-        // Cargar las relaciones necesarias para mostrar los detalles del pedido
         $customerOrder->load(['client.user', 'customerOrderItems.product']);
         return view('customer_orders.show', compact('customerOrder'));
     }
 
     /**
-     * Show the form for editing the specified resource.
-     * Muestra el formulario para editar el recurso (pedido de cliente) especificado.
-     * En este caso, solo permitiremos la edición del estado.
+     * Muestra el formulario para editar una orden.
      */
     public function edit(CustomerOrder $customerOrder): View
     {
         $customerOrder->load(['client.user', 'customerOrderItems.product']);
+        // Necesitarás la lista de productos y clientes si permites la edición completa
         return view('customer_orders.edit', compact('customerOrder'));
     }
 
     /**
-     * Update the specified resource in storage.
-     * Actualiza el recurso (pedido de cliente) especificado en la base de datos.
-     * Permite actualizar el estado del pedido.
+     * Actualiza una orden específica en la base de datos.
      */
     public function update(Request $request, CustomerOrder $customerOrder): RedirectResponse
     {
-        $request->validate([
+        $validated = $request->validate([
             'status' => 'required|in:pending,processing,completed,cancelled',
-            'shipping_address' => 'nullable|string|max:255',
+            'shipping_address' => 'nullable|string|max:500',
         ]);
-
-        // Si el estado cambia a 'cancelled', podríamos necesitar lógica para revertir stock.
-        // Esto es un tema más complejo y no lo incluiremos en este CRUD básico,
-        // pero es una consideración importante para una aplicación real.
-        // Por ahora, solo se actualiza el estado.
-
-        $customerOrder->update([
-            'status' => $request->status,
-            'shipping_address' => $request->shipping_address,
-        ]);
-
+        // Aquí podrías añadir lógica para revertir stock si se cancela un pedido
+        $customerOrder->update($validated);
         return redirect()->route('customer-orders.index')->with('success', 'Estado del pedido actualizado exitosamente.');
     }
 
     /**
-     * Remove the specified resource from storage.
-     * Elimina el recurso (pedido de cliente) especificado de la base de datos.
-     * NO RECOMENDADO para pedidos históricos, se prefiere "cancelar".
+     * "Elimina" una orden. (Desactivado por seguridad)
      */
     public function destroy(CustomerOrder $customerOrder): RedirectResponse
     {
-        // La eliminación de órdenes históricas puede ser compleja por el stock.
-        // No la implementaremos directamente para evitar inconsistencias en el stock.
-        // Se recomienda cambiar el estado a 'cancelled' en su lugar.
-        return redirect()->route('customer-orders.index')->with('error', 'La eliminación directa de pedidos históricos no está permitida para evitar inconsistencias de stock. Por favor, cambie el estado del pedido a "cancelado" si es necesario.');
-
-        // Si realmente necesitas eliminar, la lógica sería algo así:
-        /*
-        DB::beginTransaction();
-        try {
-            // Revertir movimientos de stock asociados
-            foreach ($customerOrder->stockMovements as $movement) {
-                $product = Product::find($movement->product_id);
-                if ($product) {
-                    $product->increment('stock', $movement->quantity); // Revertir el decremento
-                }
-                $movement->delete(); // Eliminar el movimiento de stock
-            }
-            // Luego, eliminar los ítems del pedido
-            $customerOrder->customerOrderItems()->delete();
-            // Finalmente, eliminar el pedido
-            $customerOrder->delete();
-
-            DB::commit();
-            return redirect()->route('customer-orders.index')->with('success', 'Pedido eliminado y stock revertido.');
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return redirect()->route('customer-orders.index')->with('error', 'Error al eliminar el pedido: ' . $e->getMessage());
-        }
-        */
+        return redirect()->route('customer-orders.index')
+            ->with('error', 'La eliminación directa de pedidos no está permitida. Por favor, cambie el estado a "cancelado".');
     }
+
+    /**
+     * Maneja la exportación de las órdenes a PDF o Excel.
+     */
+    // public function export(Request $request)
+    // {
+    //     $format = $request->query('export');
+    //     // Aquí iría tu lógica para generar el archivo
+    //     // Por ejemplo:
+    //     // if ($format === 'pdf') {
+    //     //     $pdf = Pdf::loadView('exports.orders', ['orders' => $orders]);
+    //     //     return $pdf->download('ordenes.pdf');
+    //     // }
+    //     // if ($format === 'excel') {
+    //     //     return Excel::download(new CustomerOrdersExport($request->query()), 'ordenes.xlsx');
+    //     // }
+    //     return redirect()->back()->with('error', 'Formato de exportación no válido.');
+    // }
 }

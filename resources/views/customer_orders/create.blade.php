@@ -10,6 +10,19 @@
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
             <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
                 <div class="p-6 text-gray-900">
+                    {{-- Mostrar errores generales --}}
+                    @if ($errors->has('general'))
+                        <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+                            {{ $errors->first('general') }}
+                        </div>
+                    @endif
+
+                    @if ($errors->has('quantities'))
+                        <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+                            {{ $errors->first('quantities') }}
+                        </div>
+                    @endif
+
                     <form action="{{ route('customer-orders.store') }}" method="POST">
                         @csrf
 
@@ -29,7 +42,7 @@
 
                         <h4 class="font-semibold text-lg mt-6 mb-4">{{ __('Detalles de los Productos') }}</h4>
                         <div id="product-items-container">
-                            {{-- Aquí se agregarán dinámicamente los campos para los productos --}}
+                            {{-- Primer producto (siempre visible) --}}
                             <div class="product-item border p-4 rounded-md mb-4 bg-gray-50">
                                 <div class="mb-3">
                                     <x-input-label for="product_ids_0" :value="__('Producto')" />
@@ -56,7 +69,7 @@
                         </div>
 
                         <div class="flex justify-end mb-6">
-                            <button type="button" id="add-product-item" class="text-red-500 hover:text-red-700 remove-product-item">
+                            <button type="button" id="add-product-item" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
                                 {{ __('Añadir Otro Producto') }}
                             </button>
                         </div>
@@ -93,15 +106,25 @@
         </div>
     </div>
 
-    {{-- Script para añadir/eliminar productos dinámicamente y mostrar stock --}}
+    {{-- Script corregido --}}
     <script>
         document.addEventListener('DOMContentLoaded', function () {
-            let itemCounter = 0; // Para dar IDs únicos a los nuevos ítems
+            let itemCounter = 0;
+            
+            // Crear el template de productos (generado por Blade)
+            const productOptions = `
+                <option value="">-- Seleccione un producto --</option>
+                @foreach ($products as $product)
+                    <option value="{{ $product->id }}" data-price="{{ $product->price }}" data-stock="{{ $product->stock }}">
+                        {{ $product->name }} (SKU: {{ $product->sku ?? 'N/A' }}, Stock: {{ $product->stock }})
+                    </option>
+                @endforeach
+            `;
 
             function updateStockInfo(selectElement) {
                 const selectedOption = selectElement.options[selectElement.selectedIndex];
                 const stock = selectedOption.dataset.stock;
-                const itemId = selectElement.id.split('_')[2]; // Obtener el índice del item
+                const itemId = selectElement.id.split('_')[2];
                 const stockInfoSpan = document.getElementById('stock-info-' + itemId);
                 if (stockInfoSpan) {
                     stockInfoSpan.textContent = 'Stock disponible: ' + (stock !== undefined ? stock : '--');
@@ -121,7 +144,7 @@
                 }
             });
 
-
+            // Añadir nuevo producto
             document.getElementById('add-product-item').addEventListener('click', function () {
                 itemCounter++;
                 const container = document.getElementById('product-items-container');
@@ -130,21 +153,14 @@
 
                 newItem.innerHTML = `
                     <div class="mb-3">
-                        <x-input-label for="product_ids_${itemCounter}" :value="__('Producto')" />
+                        <label for="product_ids_${itemCounter}" class="block font-medium text-sm text-gray-700">Producto</label>
                         <select id="product_ids_${itemCounter}" name="product_ids[]" class="block mt-1 w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm product-select" required>
-                            <option value="">-- Seleccione un producto --</option>
-                            @foreach ($products as $product)
-                                <option value="{{ $product->id }}" data-price="{{ $product->price }}" data-stock="{{ $product->stock }}">
-                                    {{ $product->name }} (SKU: {{ $product->sku ?? 'N/A' }}, Stock: {{ $product->stock }})
-                                </option>
-                            @endforeach
+                            ${productOptions}
                         </select>
-                        @error('product_ids.${itemCounter}')<p class="text-sm text-red-600 mt-2">{{ $message }}</p>@enderror
                     </div>
                     <div class="mb-3">
-                        <x-input-label for="quantities_${itemCounter}" :value="__('Cantidad')" />
-                        <x-text-input id="quantities_${itemCounter}" class="block mt-1 w-full quantity-input" type="number" name="quantities[]" min="1" value="1" required />
-                        @error('quantities.${itemCounter}')<p class="text-sm text-red-600 mt-2">{{ $message }}</p>@enderror
+                        <label for="quantities_${itemCounter}" class="block font-medium text-sm text-gray-700">Cantidad</label>
+                        <input id="quantities_${itemCounter}" class="block mt-1 w-full quantity-input border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm" type="number" name="quantities[]" min="1" value="1" required />
                         <span class="text-sm text-gray-500" id="stock-info-${itemCounter}">Stock disponible: --</span>
                     </div>
                     <div class="flex justify-end">
@@ -153,13 +169,14 @@
                 `;
                 container.appendChild(newItem);
 
-                // Re-inicializar el listener de stock para el nuevo select
+                // Actualizar info de stock para el nuevo select
                 const newSelect = newItem.querySelector('.product-select');
                 if (newSelect) {
-                    updateStockInfo(newSelect); // Actualizar info de stock al añadir el nuevo ítem
+                    updateStockInfo(newSelect);
                 }
             });
 
+            // Eliminar producto
             document.getElementById('product-items-container').addEventListener('click', function (event) {
                 if (event.target.classList.contains('remove-product-item')) {
                     if (document.querySelectorAll('.product-item').length > 1) {
