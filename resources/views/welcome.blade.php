@@ -16,7 +16,7 @@
         <!-- Custom background styles -->
         <style>
             .bg-custom {
-                background-image: url('/images/FondoLaBaque.jpg');
+                background-image: url('images/FondoLaBaque.jpg');
                 background-size: cover;
                 background-position: center;
                 background-repeat: no-repeat;
